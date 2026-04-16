@@ -1,0 +1,8 @@
+numpy>=1.24
+scipy>=1.10
+matplotlib>=3.7
+
+# Optional (for real IBM Q hardware workflows):
+# qiskit>=0.45
+# qiskit-aer>=0.13
+# qiskit-ibm-runtime>=0.15

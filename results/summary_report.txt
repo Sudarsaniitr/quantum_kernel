@@ -1,0 +1,31 @@
+==========================================================================
+Quantum Classifier Summary Report
+==========================================================================
+
+1) Hadamard baseline
+   max |Hadamard kernel| over sweep: 0.000e+00
+   interpretation: approximately zero everywhere for the toy problem.
+
+2) Swap-test classifier
+   min / max kernel value: -0.499267 / 0.499267
+   interpretation: sign changes cleanly across boundaries, enabling classification.
+
+3) Helstrom equivalence
+   max |swap - helstrom|: 1.665e-16
+   interpretation: numerical agreement supports Eq.(16-17) equivalence.
+
+4) Classification performance (noiseless)
+   correct: 30/30
+   boundary points: 2
+   effective accuracy: 100.00%
+
+5) Output artifacts
+   - results/01_n_copies_effect.png
+   - results/02_theory_vs_noisy.png
+   - results/03_hadamard_vs_swaptest.png
+   - results/04_bloch_sphere.png
+   - results/05_kernel_matrix.png
+   - results/06_helstrom_equivalence.png
+   - results/07_circuit_verification.png
+
+==========================================================================
