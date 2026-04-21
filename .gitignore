@@ -8,6 +8,11 @@ __pycache__/
 venv/
 env/
 
+# Environment files (keep .env.example committed)
+.env
+.env.*
+!.env.example
+
 # Tooling / editor
 .vscode/
 .idea/

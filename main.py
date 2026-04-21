@@ -13,6 +13,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import sys
 from typing import Tuple
@@ -34,6 +35,11 @@ def _results_dir() -> str:
     p = os.path.join(os.path.dirname(__file__), "results")
     os.makedirs(p, exist_ok=True)
     return p
+
+
+def _save_json(path: str, data: dict) -> None:
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2)
 
 
 def run_verification() -> bool:
@@ -237,6 +243,73 @@ def run_all_experiments(quick: bool = False):
     print("  → Saved: results/07_circuit_verification.png")
 
 
+def run_qiskit_paper_mode(
+    quick: bool = False,
+    backend_mode: str = "simulator",
+    circuit_family: str = "swap_test",
+    copies: int = 1,
+    backend_name_value: str | None = None,
+    shots: int = 8192,
+    use_noise: bool = True,
+    wait_for_result: bool = True,
+    env_file: str | None = ".env",
+) -> dict:
+    """Run paper-faithful Qiskit sweep (simulator or IBM hardware backend)."""
+    section("PAPER MODE: Qiskit Execution")
+
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    from experiments.toy_problem import analytical_swap_kernel, get_theta_range
+    from qiskit_layer.runner import run_swaptest_theta_sweep_qiskit, summarize_sign_accuracy
+    from visualization.plots import plot_qiskit_vs_theory
+
+    thetas = get_theta_range(30 if quick else 63)
+    result = run_swaptest_theta_sweep_qiskit(
+        thetas=thetas,
+        shots=shots,
+        mode=backend_mode,
+        circuit_family=circuit_family,
+        copies=copies,
+        backend_name_value=backend_name_value,
+        use_noise=use_noise,
+        wait_for_result=wait_for_result,
+        env_file=env_file,
+    )
+
+    results_dir = _results_dir()
+    json_name = f"08_qiskit_{circuit_family}_{backend_mode}_results.json"
+    json_path = os.path.join(results_dir, json_name)
+    _save_json(json_path, result)
+    print(f"  → Saved: results/{json_name}")
+
+    if result.get("expectation"):
+        measured = np.array(result["expectation"], dtype=float)
+        theory = np.array([analytical_swap_kernel(theta, n_copies=max(1, copies)) for theta in thetas], dtype=float)
+        sign_acc = summarize_sign_accuracy(measured.tolist(), theory.tolist())
+        max_abs_diff = float(np.max(np.abs(measured - theory)))
+
+        fig_name = f"09_qiskit_{circuit_family}_{backend_mode}_vs_theory.png"
+        fig = plot_qiskit_vs_theory(
+            thetas,
+            measured,
+            theory,
+            title=f"Qiskit {circuit_family} ({backend_mode}) vs analytical theory",
+            save_path=os.path.join(results_dir, fig_name),
+        )
+        plt.close(fig)
+        print(f"  → Saved: results/{fig_name}")
+        print(f"  Sign agreement with theory: {sign_acc*100:.2f}%")
+        print(f"  Max |Qiskit - theory|: {max_abs_diff:.4e}")
+    else:
+        print("  Hardware job submitted without waiting for result.")
+        print(f"  Job ID: {result['metadata'].get('job_id', 'unknown')}")
+
+    return result
+
+
 def _summary_stats(thetas_full: np.ndarray) -> Tuple[float, float, float, float]:
     from circuits.swap_test_classifier import SwapTestClassifier
     from experiments.toy_problem import get_test_state, get_training_data, true_classification
@@ -327,26 +400,63 @@ def main() -> int:
     parser.add_argument("--quick", action="store_true", help="Use fewer theta points")
     parser.add_argument("--verify", action="store_true", help="Run verification checks only")
     parser.add_argument("--report", action="store_true", help="Generate summary report only")
+    parser.add_argument("--paper-mode", action="store_true", help="Run Qiskit paper-faithful execution mode")
+    parser.add_argument("--paper-only", action="store_true", help="Skip NumPy experiment plots and run only paper-mode")
+    parser.add_argument("--paper-backend", choices=["simulator", "hardware"], default="simulator",
+                        help="Paper-mode backend type")
+    parser.add_argument("--paper-circuit", choices=["swap_test", "product_state"], default="swap_test",
+                        help="Paper-mode circuit family")
+    parser.add_argument("--paper-copies", type=int, default=1,
+                        help="Number of copies for product_state circuit family")
+    parser.add_argument("--ibm-backend", default=None,
+                        help="IBM backend name for hardware runs or backend-calibrated simulator noise")
+    parser.add_argument("--shots", type=int, default=8192, help="Number of shots for Qiskit runs")
+    parser.add_argument("--no-paper-noise", action="store_true",
+                        help="Disable noise model in paper-mode simulator runs")
+    parser.add_argument("--hardware-wait", action="store_true",
+                        help="In hardware mode, wait for result instead of submit-only")
+    parser.add_argument("--env-file", default=".env",
+                        help="Path to env file with QISKIT_IBM_* settings")
     args = parser.parse_args()
+
+    if args.paper_only and not args.paper_mode:
+        parser.error("--paper-only requires --paper-mode")
+    if args.paper_circuit == "swap_test" and args.paper_copies != 1:
+        print("Note: --paper-copies is ignored for swap_test circuit family.")
 
     run_only_report = args.report and not args.verify
 
     if args.verify:
         ok = run_verification()
-        if not args.report:
+        if not args.report and not args.paper_mode:
             return 0 if ok else 1
 
-    if not run_only_report and not args.verify:
+    if not run_only_report and not args.verify and not args.paper_only:
         ok = run_verification()
         if not ok:
             print("\nStopping because verification failed.")
             return 1
         run_all_experiments(quick=args.quick)
 
+    if args.paper_mode:
+        run_qiskit_paper_mode(
+            quick=args.quick,
+            backend_mode=args.paper_backend,
+            circuit_family=args.paper_circuit,
+            copies=args.paper_copies,
+            backend_name_value=args.ibm_backend,
+            shots=args.shots,
+            use_noise=not args.no_paper_noise,
+            wait_for_result=args.hardware_wait,
+            env_file=args.env_file,
+        )
+
     from experiments.toy_problem import get_theta_range
 
-    n_points = 30 if args.quick else 63
-    print_summary_report(get_theta_range(n_points))
+    if (not args.paper_only) or args.report:
+        n_points = 30 if args.quick else 63
+        print_summary_report(get_theta_range(n_points))
+
     return 0
 
 

@@ -450,3 +450,50 @@ def plot_circuit_verification(thetas: np.ndarray, save_path: str | None = None):
     plt.tight_layout()
     _save_if_requested(fig, save_path)
     return fig
+
+
+# ---------------------------------------------------------------------------
+# Qiskit paper-mode comparison
+# ---------------------------------------------------------------------------
+
+
+def plot_qiskit_vs_theory(
+    thetas: np.ndarray,
+    measured: np.ndarray,
+    theory: np.ndarray,
+    save_path: str | None = None,
+    title: str = "Qiskit swap-test vs analytical theory",
+):
+    """Plot Qiskit measured expectation values against analytical theory."""
+    measured = np.asarray(measured, dtype=float)
+    theory = np.asarray(theory, dtype=float)
+    diff = measured - theory
+
+    fig, axes = plt.subplots(2, 1, figsize=(10, 8))
+
+    ax = axes[0]
+    ax.plot(thetas, theory, "k-", linewidth=2.3, label="Theory")
+    ax.plot(thetas, measured, "o-", color="#1f77b4", markersize=3.5, linewidth=1.5, label="Qiskit")
+    ax.axhline(0, color="gray", linewidth=0.8, linestyle=":")
+    ax.set_title(title)
+    ax.set_xlabel("θ (radians)")
+    ax.set_ylabel(r"$\langle \sigma_z^{(a)} \sigma_z^{(l)} \rangle$")
+    ax.set_xticks([0, np.pi / 2, np.pi, 3 * np.pi / 2, 2 * np.pi])
+    ax.set_xticklabels(["0", "π/2", "π", "3π/2", "2π"])
+    ax.grid(True, alpha=0.3)
+    ax.legend()
+
+    ax2 = axes[1]
+    ax2.plot(thetas, diff, color="#d62728", linewidth=1.8, label="Qiskit - Theory")
+    ax2.axhline(0, color="k", linewidth=0.8)
+    ax2.set_xlabel("θ (radians)")
+    ax2.set_ylabel("Difference")
+    ax2.set_title("Deviation curve")
+    ax2.set_xticks([0, np.pi / 2, np.pi, 3 * np.pi / 2, 2 * np.pi])
+    ax2.set_xticklabels(["0", "π/2", "π", "3π/2", "2π"])
+    ax2.grid(True, alpha=0.3)
+    ax2.legend()
+
+    plt.tight_layout()
+    _save_if_requested(fig, save_path)
+    return fig

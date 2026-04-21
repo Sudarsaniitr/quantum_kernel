@@ -1,0 +1,8 @@
+# Install base dependencies first:
+#   pip install -r requirements.txt
+
+# Qiskit paper-mode stack
+qiskit>=1.2
+qiskit-aer>=0.15
+qiskit-ibm-runtime>=0.35
+python-dotenv>=1.0
