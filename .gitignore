@@ -20,3 +20,14 @@ env/
 # OS files
 .DS_Store
 Thumbs.db
+
+# Session logs and personal notes
+chatlog.md
+logs/
+
+# Claude Code internal state
+.claude/
+
+# Temporary probe/debug scripts from development sessions
+ibm_probe.py
+verify_completed_job.py

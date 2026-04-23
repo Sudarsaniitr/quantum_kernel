@@ -2,6 +2,24 @@
 qiskit_layer/runner.py
 ======================
 Execution runners for paper-mode Qiskit experiments.
+
+This module bridges the toy-problem circuits (qiskit_layer/circuits.py) and
+the IBM Quantum infrastructure, handling two execution modes:
+
+  Simulator mode  — AerSimulator with optional depolarising noise model.
+                    Deterministic seed, fast, reproducible.
+
+  Hardware mode   — IBM Quantum backend (e.g. ibm_kingston).
+                    Uses qiskit-ibm-runtime SamplerV2 (legacy backend.run()
+                    was removed in newer runtime versions).
+
+Measurement formula (paper supplemental, Eq. after Eq. 9):
+  ⟨σz^(a) σz^(l)⟩ = (c00 − c01 − c10 + c11) / shots
+  where cXY = count of ancilla=X, label=Y measurement outcomes.
+
+Hardware result extraction is version-defensive: IBM Runtime has changed its
+PrimitiveResult schema across releases, so _extract_counts_from_sampler_pub()
+searches multiple common attribute locations before giving up.
 """
 
 from __future__ import annotations
@@ -44,6 +62,48 @@ def expectation_from_counts(counts: dict[str, int]) -> float:
 
 def _serialize_counts(counts_list: Sequence[dict[str, int]]) -> list[dict[str, int]]:
     return [{str(k): int(v) for k, v in c.items()} for c in counts_list]
+
+
+def _extract_counts_from_sampler_pub(pub_result) -> dict[str, int]:
+    """
+    Best-effort extraction of bitstring counts from a SamplerV2 pub result.
+
+    Runtime result schemas can vary slightly across versions/backends, so this
+    helper searches common locations for objects exposing get_counts().
+    """
+    data = getattr(pub_result, "data", None)
+    if data is None:
+        return {}
+
+    # Some schemas expose get_counts directly on data.
+    direct = getattr(data, "get_counts", None)
+    if callable(direct):
+        try:
+            c = direct()
+            if isinstance(c, dict):
+                return {str(k): int(v) for k, v in c.items()}
+        except Exception:
+            pass
+
+    # Common schema: data.<creg_name>.get_counts(), e.g. data.c.get_counts()
+    for attr in dir(data):
+        if attr.startswith("_"):
+            continue
+        try:
+            obj = getattr(data, attr)
+        except Exception:
+            continue
+
+        getter = getattr(obj, "get_counts", None)
+        if callable(getter):
+            try:
+                c = getter()
+                if isinstance(c, dict):
+                    return {str(k): int(v) for k, v in c.items()}
+            except Exception:
+                continue
+
+    return {}
 
 
 def run_swaptest_theta_sweep_qiskit(
@@ -160,7 +220,16 @@ def run_swaptest_theta_sweep_qiskit(
 
     backend = get_ibm_backend(backend_name_value, cfg)
     tqc = transpile(circuits, backend=backend, optimization_level=optimization_level)
-    job = backend.run(tqc, shots=shots)
+
+    try:
+        from qiskit_ibm_runtime import SamplerV2 as Sampler
+    except Exception as exc:  # pragma: no cover
+        raise RuntimeError(
+            "IBM hardware mode requires qiskit-ibm-runtime SamplerV2 support."
+        ) from exc
+
+    sampler = Sampler(mode=backend)
+    job = sampler.run(tqc, shots=shots)
 
     meta.update(
         {
@@ -180,7 +249,26 @@ def run_swaptest_theta_sweep_qiskit(
         }
 
     result = job.result()
-    counts_list = [result.get_counts(i) for i in range(len(circuits))]
+
+    # PrimitiveResult is iterable over pub results.
+    try:
+        pubs = list(result)
+    except Exception:
+        pubs = [result[i] for i in range(len(circuits))]
+
+    counts_list = []
+    for i in range(len(circuits)):
+        if i < len(pubs):
+            counts_list.append(_extract_counts_from_sampler_pub(pubs[i]))
+        else:
+            counts_list.append({})
+
+    if all(len(c) == 0 for c in counts_list):
+        raise RuntimeError(
+            "Hardware result returned no extractable counts from Sampler output. "
+            "Please inspect runtime result schema for this backend/version."
+        )
+
     expectations = [expectation_from_counts(c) for c in counts_list]
 
     return {

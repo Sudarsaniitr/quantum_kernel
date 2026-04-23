@@ -16,7 +16,7 @@ import argparse
 import json
 import os
 import sys
-from typing import Tuple
+from typing import Sequence, Tuple
 
 import numpy as np
 
@@ -310,6 +310,260 @@ def run_qiskit_paper_mode(
     return result
 
 
+def _parse_copy_list(copies_text: str) -> list[int]:
+    vals = []
+    for token in (copies_text or "").split(","):
+        token = token.strip()
+        if not token:
+            continue
+        vals.append(int(token))
+
+    if not vals:
+        raise ValueError("At least one copy value must be provided.")
+    if any(v < 1 for v in vals):
+        raise ValueError("All copy values must be >= 1.")
+    return sorted(set(vals))
+
+
+def run_qiskit_shots_comparison(
+    quick: bool,
+    backend_mode: str,
+    shots_values: Sequence[int],
+    backend_name_value: str | None = None,
+    use_noise: bool = True,
+    wait_for_result: bool = True,
+    env_file: str | None = ".env",
+) -> dict:
+    """Run old-architecture paper model at multiple shot counts and compare."""
+    section("COMPARISON: Old architecture shots sweep")
+
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    from experiments.toy_problem import analytical_swap_kernel, get_theta_range
+    from qiskit_layer.mitigation import curve_error_metrics
+    from qiskit_layer.runner import run_swaptest_theta_sweep_qiskit
+    from visualization.plots import plot_qiskit_shots_comparison
+
+    thetas = get_theta_range(30 if quick else 63)
+    theory_n1 = np.array([analytical_swap_kernel(theta, n_copies=1) for theta in thetas], dtype=float)
+    results_dir = _results_dir()
+
+    shot_curves: dict[int, np.ndarray] = {}
+    run_records: dict[str, dict] = {}
+    metrics: dict[str, dict] = {}
+
+    for shot in sorted(set(int(s) for s in shots_values)):
+        run = run_swaptest_theta_sweep_qiskit(
+            thetas=thetas,
+            shots=int(shot),
+            mode=backend_mode,
+            circuit_family="swap_test",
+            copies=1,
+            backend_name_value=backend_name_value,
+            use_noise=use_noise,
+            wait_for_result=wait_for_result,
+            env_file=env_file,
+        )
+
+        run_file = f"10_qiskit_swap_test_{backend_mode}_shots_{shot}_results.json"
+        _save_json(os.path.join(results_dir, run_file), run)
+        print(f"  → Saved: results/{run_file}")
+
+        run_records[str(shot)] = run
+
+        if run.get("expectation"):
+            measured = np.array(run["expectation"], dtype=float)
+            shot_curves[int(shot)] = measured
+            metrics[str(shot)] = curve_error_metrics(measured, theory_n1)
+
+    summary = {
+        "metadata": {
+            "mode": backend_mode,
+            "comparison": "old_architecture_shots",
+            "shot_values": [int(s) for s in sorted(set(int(x) for x in shots_values))],
+            "thetas": [float(t) for t in thetas],
+            "n_theta": int(len(thetas)),
+        },
+        "theory_n1": [float(x) for x in theory_n1],
+        "runs": run_records,
+        "metrics_vs_theory_n1": metrics,
+        "curves_by_shot": {str(k): [float(v) for v in vals] for k, vals in shot_curves.items()},
+    }
+
+    summary_file = f"11_qiskit_swap_test_{backend_mode}_shots_comparison.json"
+    _save_json(os.path.join(results_dir, summary_file), summary)
+    print(f"  → Saved: results/{summary_file}")
+
+    if shot_curves:
+        fig_file = f"12_qiskit_swap_test_{backend_mode}_shots_comparison.png"
+        fig = plot_qiskit_shots_comparison(
+            thetas,
+            theory_n1,
+            measured_by_shot=shot_curves,
+            title=f"Old architecture (swap-test n=1) shots comparison [{backend_mode}]",
+            save_path=os.path.join(results_dir, fig_file),
+        )
+        plt.close(fig)
+        print(f"  → Saved: results/{fig_file}")
+
+    return summary
+
+
+def run_vce_novelty_comparison(
+    quick: bool,
+    backend_mode: str,
+    shots: int,
+    physical_copies: Sequence[int],
+    target_copies: int,
+    backend_name_value: str | None = None,
+    use_noise: bool = True,
+    wait_for_result: bool = True,
+    env_file: str | None = ".env",
+    baseline_old_arch_curve: Sequence[float] | None = None,
+) -> dict:
+    """Run novelty VCE pipeline and compare pre-/post-novelty at fixed shots."""
+    section("NOVELTY: Virtual Copy Extrapolation (VCE)")
+
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    from experiments.toy_problem import analytical_swap_kernel, get_theta_range
+    from qiskit_layer.mitigation import build_vce_curves, curve_error_metrics
+    from qiskit_layer.runner import run_swaptest_theta_sweep_qiskit
+    from visualization.plots import plot_vce_target_comparison
+
+    if target_copies < 1:
+        raise ValueError("target_copies must be >= 1")
+
+    copy_list = sorted(set(int(c) for c in physical_copies))
+    if any(c < 1 for c in copy_list):
+        raise ValueError("physical_copies must contain integers >= 1")
+
+    thetas = get_theta_range(30 if quick else 63)
+    results_dir = _results_dir()
+
+    raw_runs: dict[str, dict] = {}
+    physical_curves: dict[int, np.ndarray] = {}
+
+    for copy in copy_list:
+        run = run_swaptest_theta_sweep_qiskit(
+            thetas=thetas,
+            shots=int(shots),
+            mode=backend_mode,
+            circuit_family="product_state",
+            copies=int(copy),
+            backend_name_value=backend_name_value,
+            use_noise=use_noise,
+            wait_for_result=wait_for_result,
+            env_file=env_file,
+        )
+
+        run_file = f"13_qiskit_product_state_{backend_mode}_copies_{copy}_shots_{int(shots)}_results.json"
+        _save_json(os.path.join(results_dir, run_file), run)
+        print(f"  → Saved: results/{run_file}")
+
+        raw_runs[str(copy)] = run
+        if run.get("expectation"):
+            physical_curves[int(copy)] = np.array(run["expectation"], dtype=float)
+
+    summary = {
+        "metadata": {
+            "mode": backend_mode,
+            "shots": int(shots),
+            "physical_copies": [int(c) for c in copy_list],
+            "target_copies": int(target_copies),
+            "thetas": [float(t) for t in thetas],
+            "n_theta": int(len(thetas)),
+        },
+        "raw_runs": raw_runs,
+        "physical_curves": {str(k): [float(x) for x in v] for k, v in physical_curves.items()},
+        "theory_curves": {},
+        "virtual_curves": {},
+        "metrics": {},
+    }
+
+    if 1 not in physical_curves or 2 not in physical_curves:
+        summary_file = f"14_qiskit_vce_{backend_mode}_shots_{int(shots)}_summary.json"
+        _save_json(os.path.join(results_dir, summary_file), summary)
+        print("  VCE metrics skipped: missing physical n=1 and/or n=2 expectations.")
+        print(f"  → Saved: results/{summary_file}")
+        return summary
+
+    for copy in sorted(physical_curves.keys()):
+        th = np.array([analytical_swap_kernel(theta, n_copies=copy) for theta in thetas], dtype=float)
+        summary["theory_curves"][str(copy)] = [float(x) for x in th]
+        summary["metrics"][f"physical_n{copy}_vs_theory_n{copy}"] = curve_error_metrics(physical_curves[copy], th)
+
+    theory_target = np.array([analytical_swap_kernel(theta, n_copies=target_copies) for theta in thetas], dtype=float)
+    summary["theory_curves"][str(target_copies)] = [float(x) for x in theory_target]
+
+    vce_curves = build_vce_curves(physical_curves, target_copies=target_copies)
+    summary["virtual_curves"] = vce_curves
+
+    virtual_n3 = np.array(vce_curves["virtual_n3_from_12"], dtype=float)
+    theory_n3 = np.array([analytical_swap_kernel(theta, n_copies=3) for theta in thetas], dtype=float)
+    summary["theory_curves"]["3"] = [float(x) for x in theory_n3]
+    summary["metrics"]["virtual_n3_from_12_vs_theory_n3"] = curve_error_metrics(virtual_n3, theory_n3)
+
+    virtual_target = np.array(vce_curves["virtual_target_from_123"], dtype=float)
+    summary["metrics"][f"virtual_n{target_copies}_from_123_vs_theory_n{target_copies}"] = curve_error_metrics(
+        virtual_target,
+        theory_target,
+    )
+
+    if 3 in physical_curves:
+        summary["metrics"]["pre_novelty_physical_n3_vs_theory_n3"] = curve_error_metrics(
+            physical_curves[3],
+            theory_n3,
+        )
+        summary["metrics"]["post_novelty_virtual_n3_vs_theory_n3"] = curve_error_metrics(
+            virtual_n3,
+            theory_n3,
+        )
+
+    baseline_curve = None
+    if baseline_old_arch_curve is not None:
+        baseline_curve = np.array(baseline_old_arch_curve, dtype=float)
+
+    if 3 in physical_curves:
+        physical_target_curve = physical_curves[3]
+        virtual_target_curve = virtual_n3
+        theory_for_plot = theory_n3
+        plot_title = f"Pre/Post novelty comparison at {shots} shots [{backend_mode}] (target n=3)"
+    else:
+        physical_target_curve = physical_curves[max(physical_curves.keys())]
+        virtual_target_curve = virtual_target
+        theory_for_plot = theory_target
+        plot_title = (
+            f"Pre/Post novelty comparison at {shots} shots [{backend_mode}] "
+            f"(target n={target_copies})"
+        )
+
+    fig_file = f"15_qiskit_vce_{backend_mode}_shots_{int(shots)}_pre_post.png"
+    fig = plot_vce_target_comparison(
+        thetas,
+        theory_target=theory_for_plot,
+        physical_target=physical_target_curve,
+        virtual_target=virtual_target_curve,
+        baseline_n1=baseline_curve,
+        title=plot_title,
+        save_path=os.path.join(results_dir, fig_file),
+    )
+    plt.close(fig)
+    print(f"  → Saved: results/{fig_file}")
+
+    summary_file = f"14_qiskit_vce_{backend_mode}_shots_{int(shots)}_summary.json"
+    _save_json(os.path.join(results_dir, summary_file), summary)
+    print(f"  → Saved: results/{summary_file}")
+
+    return summary
+
+
 def _summary_stats(thetas_full: np.ndarray) -> Tuple[float, float, float, float]:
     from circuits.swap_test_classifier import SwapTestClassifier
     from experiments.toy_problem import get_test_state, get_training_data, true_classification
@@ -417,6 +671,12 @@ def main() -> int:
                         help="In hardware mode, wait for result instead of submit-only")
     parser.add_argument("--env-file", default=".env",
                         help="Path to env file with QISKIT_IBM_* settings")
+    parser.add_argument("--compare-suite", action="store_true",
+                        help="Run full comparison suite: old-architecture shots + novelty VCE")
+    parser.add_argument("--vce-physical-copies", default="1,2,3",
+                        help="Comma-separated physical copies for novelty run, e.g. 1,2,3")
+    parser.add_argument("--vce-target-copies", type=int, default=5,
+                        help="Virtual target copies for extrapolation summaries")
     args = parser.parse_args()
 
     if args.paper_only and not args.paper_mode:
@@ -431,7 +691,7 @@ def main() -> int:
         if not args.report and not args.paper_mode:
             return 0 if ok else 1
 
-    if not run_only_report and not args.verify and not args.paper_only:
+    if not run_only_report and not args.verify and not args.paper_only and not args.compare_suite:
         ok = run_verification()
         if not ok:
             print("\nStopping because verification failed.")
@@ -450,6 +710,57 @@ def main() -> int:
             wait_for_result=args.hardware_wait,
             env_file=args.env_file,
         )
+
+    if args.compare_suite:
+        high_shots = int(args.shots)
+        if high_shots <= 256:
+            high_shots = 1024
+
+        shots_cmp = run_qiskit_shots_comparison(
+            quick=args.quick,
+            backend_mode=args.paper_backend,
+            shots_values=(256, high_shots),
+            backend_name_value=args.ibm_backend,
+            use_noise=not args.no_paper_noise,
+            wait_for_result=args.hardware_wait,
+            env_file=args.env_file,
+        )
+
+        baseline_curve = None
+        baseline_key = str(high_shots)
+        if baseline_key in shots_cmp.get("curves_by_shot", {}):
+            baseline_curve = shots_cmp["curves_by_shot"][baseline_key]
+
+        vce_cmp = run_vce_novelty_comparison(
+            quick=args.quick,
+            backend_mode=args.paper_backend,
+            shots=high_shots,
+            physical_copies=_parse_copy_list(args.vce_physical_copies),
+            target_copies=int(args.vce_target_copies),
+            backend_name_value=args.ibm_backend,
+            use_noise=not args.no_paper_noise,
+            wait_for_result=args.hardware_wait,
+            env_file=args.env_file,
+            baseline_old_arch_curve=baseline_curve,
+        )
+
+        suite_summary = {
+            "metadata": {
+                "mode": args.paper_backend,
+                "high_shots": int(high_shots),
+                "requested": {
+                    "shots_comparison": [256, int(high_shots)],
+                    "vce_physical_copies": _parse_copy_list(args.vce_physical_copies),
+                    "vce_target_copies": int(args.vce_target_copies),
+                },
+            },
+            "shots_comparison_summary": shots_cmp,
+            "vce_summary": vce_cmp,
+        }
+
+        suite_file = f"16_qiskit_{args.paper_backend}_comparison_suite_summary.json"
+        _save_json(os.path.join(_results_dir(), suite_file), suite_summary)
+        print(f"  → Saved: results/{suite_file}")
 
     from experiments.toy_problem import get_theta_range
 

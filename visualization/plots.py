@@ -497,3 +497,132 @@ def plot_qiskit_vs_theory(
     plt.tight_layout()
     _save_if_requested(fig, save_path)
     return fig
+
+
+def plot_qiskit_shots_comparison(
+    thetas: np.ndarray,
+    theory: np.ndarray,
+    measured_by_shot: dict[int, np.ndarray],
+    save_path: str | None = None,
+    title: str = "Qiskit paper-model: shots comparison",
+):
+    """Plot measured curves for multiple shot counts against analytical theory."""
+    theory = np.asarray(theory, dtype=float)
+    shot_keys = sorted(int(k) for k in measured_by_shot.keys())
+    if not shot_keys:
+        raise ValueError("measured_by_shot must not be empty")
+
+    fig, axes = plt.subplots(2, 1, figsize=(10, 8))
+
+    ax = axes[0]
+    ax.plot(thetas, theory, "k-", linewidth=2.2, label="Theory")
+
+    palette = ["#1f77b4", "#ff7f0e", "#2ca02c", "#9467bd"]
+    for idx, shot in enumerate(shot_keys):
+        measured = np.asarray(measured_by_shot[shot], dtype=float)
+        color = palette[idx % len(palette)]
+        ax.plot(
+            thetas,
+            measured,
+            "o-",
+            color=color,
+            markersize=3.2,
+            linewidth=1.4,
+            label=f"Qiskit ({shot} shots)",
+        )
+
+    ax.axhline(0, color="gray", linewidth=0.8, linestyle=":")
+    ax.set_title(title)
+    ax.set_xlabel("θ (radians)")
+    ax.set_ylabel(r"$\langle \sigma_z^{(a)} \sigma_z^{(l)} \rangle$")
+    ax.set_xticks([0, np.pi / 2, np.pi, 3 * np.pi / 2, 2 * np.pi])
+    ax.set_xticklabels(["0", "π/2", "π", "3π/2", "2π"])
+    ax.grid(True, alpha=0.3)
+    ax.legend()
+
+    ax2 = axes[1]
+    for idx, shot in enumerate(shot_keys):
+        measured = np.asarray(measured_by_shot[shot], dtype=float)
+        color = palette[idx % len(palette)]
+        ax2.plot(
+            thetas,
+            measured - theory,
+            linewidth=1.6,
+            color=color,
+            label=f"{shot} shots - theory",
+        )
+
+    ax2.axhline(0, color="k", linewidth=0.8)
+    ax2.set_xlabel("θ (radians)")
+    ax2.set_ylabel("Difference")
+    ax2.set_title("Deviation curves")
+    ax2.set_xticks([0, np.pi / 2, np.pi, 3 * np.pi / 2, 2 * np.pi])
+    ax2.set_xticklabels(["0", "π/2", "π", "3π/2", "2π"])
+    ax2.grid(True, alpha=0.3)
+    ax2.legend()
+
+    plt.tight_layout()
+    _save_if_requested(fig, save_path)
+    return fig
+
+
+def plot_vce_target_comparison(
+    thetas: np.ndarray,
+    theory_target: np.ndarray,
+    physical_target: np.ndarray,
+    virtual_target: np.ndarray,
+    baseline_n1: np.ndarray | None = None,
+    save_path: str | None = None,
+    title: str = "Virtual Copy Extrapolation (VCE) comparison",
+):
+    """Plot pre-/post-novelty comparison for a chosen target-copy kernel."""
+    theory_target = np.asarray(theory_target, dtype=float)
+    physical_target = np.asarray(physical_target, dtype=float)
+    virtual_target = np.asarray(virtual_target, dtype=float)
+    if baseline_n1 is not None:
+        baseline_n1 = np.asarray(baseline_n1, dtype=float)
+
+    fig, axes = plt.subplots(2, 1, figsize=(10, 8))
+
+    ax = axes[0]
+    ax.plot(thetas, theory_target, "k-", linewidth=2.2, label="Theory (target n)")
+    ax.plot(thetas, physical_target, "o-", color="#1f77b4", linewidth=1.4, markersize=3.2,
+            label="Before novelty: physical target n")
+    ax.plot(thetas, virtual_target, "o-", color="#d62728", linewidth=1.4, markersize=3.2,
+            label="After novelty: virtual target n (VCE)")
+    if baseline_n1 is not None:
+        ax.plot(
+            thetas,
+            baseline_n1,
+            "--",
+            color="#2ca02c",
+            linewidth=1.4,
+            alpha=0.8,
+            label="Old architecture (n=1)",
+        )
+
+    ax.axhline(0, color="gray", linewidth=0.8, linestyle=":")
+    ax.set_title(title)
+    ax.set_xlabel("θ (radians)")
+    ax.set_ylabel(r"$\langle \sigma_z^{(a)} \sigma_z^{(l)} \rangle$")
+    ax.set_xticks([0, np.pi / 2, np.pi, 3 * np.pi / 2, 2 * np.pi])
+    ax.set_xticklabels(["0", "π/2", "π", "3π/2", "2π"])
+    ax.grid(True, alpha=0.3)
+    ax.legend()
+
+    ax2 = axes[1]
+    ax2.plot(thetas, np.abs(physical_target - theory_target), color="#1f77b4", linewidth=1.8,
+             label="|physical target - theory|")
+    ax2.plot(thetas, np.abs(virtual_target - theory_target), color="#d62728", linewidth=1.8,
+             label="|virtual target - theory|")
+    ax2.set_xlabel("θ (radians)")
+    ax2.set_ylabel("Absolute error")
+    ax2.set_title("Error magnitude vs target-copy theory")
+    ax2.set_xticks([0, np.pi / 2, np.pi, 3 * np.pi / 2, 2 * np.pi])
+    ax2.set_xticklabels(["0", "π/2", "π", "3π/2", "2π"])
+    ax2.grid(True, alpha=0.3)
+    ax2.legend()
+
+    plt.tight_layout()
+    _save_if_requested(fig, save_path)
+    return fig

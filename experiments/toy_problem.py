@@ -1,17 +1,33 @@
 """
 experiments/toy_problem.py
 ===========================
-Toy problem from Eq.(11) of the paper.
+Implements the 1-qubit toy classification problem from Section 3 of:
 
-Training states:
-  |x1⟩ = (i/√2)|0⟩ + (1/√2)|1⟩   with label y1=0
-  |x2⟩ = (i/√2)|0⟩ - (1/√2)|1⟩   with label y2=1
+  Blank et al., npj Quantum Information 6, 41 (2020).
+  https://www.nature.com/articles/s41534-020-0272-6
 
-Test state:
-  |x̃(θ)⟩ = cos(θ/2)|0⟩ + i sin(θ/2)|1⟩
+The toy problem is specifically designed to demonstrate that the Hadamard
+classifier (prior work) cannot distinguish the two classes, while the
+swap-test classifier (paper's contribution) can.
 
-Hadamard baseline fails because Re⟨x̃|x_m⟩ = 0 for all θ here.
-Swap-test succeeds by using |⟨x̃|x_m⟩|².
+--- Setup ---
+Training states (Eq. 11):
+  |x1⟩ = (i/√2)|0⟩ + (1/√2)|1⟩   label y1 = 0  (class A)
+  |x2⟩ = (i/√2)|0⟩ − (1/√2)|1⟩   label y2 = 1  (class B)
+
+Test state swept over all angles:
+  |x̃(θ)⟩ = cos(θ/2)|0⟩ + i·sin(θ/2)|1⟩   θ ∈ [0, 2π]
+
+--- Why Hadamard fails ---
+The Hadamard kernel uses Re⟨x̃|x_m⟩. For our training states:
+  Re⟨x̃|x1⟩ = Re⟨x̃|x2⟩ = 0  for ALL θ
+So the Hadamard kernel = 0 everywhere — it cannot make decisions.
+
+--- Why swap-test succeeds ---
+The swap-test kernel uses |⟨x̃|x_m⟩|² (fidelity, always ≥ 0).
+  |⟨x̃|x1⟩|² = cos²((θ−π/2)/2) — peaks near θ = π/2
+  |⟨x̃|x2⟩|² = sin²((θ−π/2)/2) — peaks near θ = 3π/2
+These are different for almost every θ, so sign(K_S) correctly classifies.
 """
 
 from __future__ import annotations

@@ -1,12 +1,27 @@
 """
 core/kernel.py
 ==============
-Classical computation of the quantum kernels described in the paper.
+Classical (NumPy) computation of the quantum kernels described in:
 
-Key equations:
-  - Eq.(6):  Hadamard kernel  = Σ_m (-1)^y_m w_m Re⟨x̃|x_m⟩
-  - Eq.(9):  Swap-test kernel = Σ_m (-1)^y_m w_m |⟨x̃|x_m⟩|^(2n)
-  - Eq.(14): Limit n→∞ gives a highly localized kernel response.
+  Blank, Park, Rhee, Petruccione — "Quantum classifier with tailored quantum kernel"
+  npj Quantum Information 6, 41 (2020).  DOI: 10.1038/s41534-020-0272-6
+
+The module implements three kernel quantities:
+
+  Hadamard kernel (Eq. 6):
+      K_H(x̃) = Σ_m (-1)^{y_m} w_m Re⟨x̃|x_m⟩
+      Uses only the REAL part of the inner product. Fails on the toy problem
+      because the training states are constructed so Re⟨x̃|x_m⟩ = 0 for all θ.
+
+  Swap-test kernel (Eq. 9):
+      K_S(x̃) = Σ_m (-1)^{y_m} w_m |⟨x̃|x_m⟩|^{2n}
+      Uses the squared magnitude (fidelity) raised to the n-th power.
+      As n → ∞ the kernel sharpens toward a Dirac-delta response at the
+      training states — tighter decision boundary with more copies.
+
+  Helstrom operator (Eqs. 16–17):
+      A = Σ_{y_m=0} w_m |x_m^⊗n⟩⟨x_m^⊗n| − Σ_{y_m=1} w_m |x_m^⊗n⟩⟨x_m^⊗n|
+      Theorem: ⟨x̃^⊗n|A|x̃^⊗n⟩ = K_S(x̃), verified numerically to ~1e-16.
 """
 
 from __future__ import annotations

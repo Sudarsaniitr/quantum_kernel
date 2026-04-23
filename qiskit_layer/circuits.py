@@ -1,10 +1,33 @@
 """
 qiskit_layer/circuits.py
 ========================
-Qiskit circuit builders for the toy-problem classifiers.
+Qiskit circuit builders for both paper-faithful classifier circuits.
 
-These circuits are adapted to match the paper's supplemental implementation
-style for the swap-test classifier and n-copy product-state variant.
+The two circuits correspond to the two main evaluations in the paper:
+
+  build_swap_test_toy_circuit(theta)
+      Implements the 5-qubit swap-test classifier (paper Eq. 9, n=1).
+      Qubit layout: index(m) | label(l) | training-data(d) | test-data(in) | ancilla(a)
+      Measurement: ancilla → c[0],  label → c[1]
+      ⟨σz^(a) σz^(l)⟩ from counts gives the kernel value.
+
+  build_product_state_n_copies_circuit(theta, copies)
+      Implements the n-copy product-state circuit (paper Fig. 3, Eq. 12 for n>1).
+      Register layout: a(1) | m(1) | d(copies) | l(1) | in(copies)
+      Running copies=3 physically requires 3× as many data qubits but gives a
+      sharper kernel K_3 = Σ w_m |⟨x̃|x_m⟩|^6 that separates classes better.
+      This is the circuit that VCE (mitigation.py) avoids running at large n.
+
+Training state preparation details
+-----------------------------------
+Training states from Eq.(11):
+  |x1⟩ = (i/√2)|0⟩ + (1/√2)|1⟩   class 0
+  |x2⟩ = (i/√2)|0⟩ − (1/√2)|1⟩   class 1
+
+The index qubit is prepared in sqrt(w1)|0⟩ + sqrt(w2)|1⟩ via RY(2·arcsin(√w2)).
+Training data qubit is prepared as H → Rz(-π) → S, then conditionally phase-
+flipped by CZ with the index qubit to encode the ±1/√2 sign difference.
+Test state |x̃(θ)⟩ = cos(θ/2)|0⟩ + i·sin(θ/2)|1⟩ is prepared by RX(-θ).
 """
 
 from __future__ import annotations
